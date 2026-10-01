@@ -1,0 +1,63 @@
+name: collector
+
+# Galactic War Monitor — publiczny harmonogram collectora.
+# To repo zawiera WYŁĄCZNIE ten workflow + README. Zero kodu aplikacji.
+
+on:
+  schedule:
+    # co 5 minut (minimum GitHub Actions; uruchomienia bywają opóźniane pod obciążeniem)
+    - cron: "*/5 * * * *"
+  # ręczny trigger (przycisk "Run workflow" w zakładce Actions)
+  workflow_dispatch: {}
+
+# Collector = dokładnie jedna instancja naraz: kolejne uruchomienia czekają w
+# kolejce i NIE przerywają bieżącego polla. Drugą warstwą ochrony przed
+# dublowaniem zapisów jest advisory lock wbudowany w collectora (apps/collector).
+concurrency:
+  group: collector
+  cancel-in-progress: false
+
+# Minimalne uprawnienia domyślnego tokenu — workflow niczego tu nie zapisuje.
+permissions:
+  contents: read
+
+jobs:
+  poll:
+    name: poll-once
+    runs-on: ubuntu-latest
+    # zabezpieczenie przed zawieszonym runem (nie pali runnera godzinami)
+    timeout-minutes: 10
+    steps:
+      - name: Checkout prywatnego repo aplikacji (deploy key, read-only)
+        uses: actions/checkout@v5
+        with:
+          # pełna nazwa prywatnego repo (owner/nazwa) — w Secrets, nie w YAML-u
+          repository: ${{ secrets.APP_REPOSITORY }}
+          # deploy key TYLKO-DO-ODCZYTU repo aplikacji (klucz prywatny w Secrets)
+          ssh-key: ${{ secrets.APP_DEPLOY_KEY }}
+          ref: master
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # cache zależności (package-lock.json w korzeniu repo aplikacji)
+          cache: npm
+
+      - name: Instalacja zależności (npm workspaces; postinstall generuje klienta Prisma)
+        run: npm ci
+
+      - name: Generacja klienta Prisma (README sekcja "Nowy worktree / świeży clone")
+        run: npm run db:generate -w @gwm/db
+
+      - name: Build (pełny, zgodnie z README)
+        run: npm run build
+
+      # Jednorazowy poll: community API → normalizacja → baza (stan + snapshoty).
+      # Zmiana war_id/sezonu wykrywana na podstawie bazy (seed per run, bez
+      # pamięci procesu); błędy (np. zawieszony Neon) kończą run statusem failed.
+      - name: Jednorazowy poll collectora
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }} # Neon — endpoint pooler (runtime)
+          GWM_SUPER_CLIENT: ${{ secrets.X_SUPER_CLIENT }}
+          GWM_SUPER_CONTACT: ${{ secrets.X_SUPER_CONTACT }}
+        run: npm run collector:poll

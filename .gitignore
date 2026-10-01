@@ -1,0 +1,7 @@
+# Sekrety lokalne — NIGDY nie commitować
+.env
+.env.*
+*.pem
+deploy_key*
+id_ed25519*
+id_rsa*
