@@ -24,10 +24,21 @@ permissions:
 jobs:
   poll:
     name: poll-once
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # zabezpieczenie przed zawieszonym runem (nie pali runnera godzinami)
     timeout-minutes: 10
     steps:
+      # Fail-fast: bez sekretu APP_REPOSITORY checkout pobrałby TO repo
+      # (brak package-lock.json aplikacji → błąd setup-node; geneza runa #1).
+      - name: "Guard: APP_REPOSITORY ustawiony"
+        env:
+          APP_REPOSITORY: ${{ secrets.APP_REPOSITORY }}
+        run: |
+          if [ -z "$APP_REPOSITORY" ]; then
+            echo "::error title=Brak sekretu APP_REPOSITORY::Dodaj sekret APP_REPOSITORY (Settings → Secrets and variables → Actions). Bez niego checkout pobiera to repo zamiast repo aplikacji — brak package-lock.json."
+            exit 1
+          fi
+
       - name: Checkout prywatnego repo aplikacji (deploy key, read-only)
         uses: actions/checkout@v5
         with:
@@ -37,7 +48,7 @@ jobs:
           ssh-key: ${{ secrets.APP_DEPLOY_KEY }}
           ref: master
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           # cache zależności (package-lock.json w korzeniu repo aplikacji)
